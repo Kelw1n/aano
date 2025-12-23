@@ -11,17 +11,18 @@ TOKEN = "7981362710:AAE8yFG-pgP_MPrrvhw7ayF-CLLQBK2Sw4g"
 ADMIN_ID = 1150861829
 AI_API_KEY = "AIzaSyDSxDkw6deZjjbT1WU-T6pWw9atfk3567s"
 
-# Настройка нейросети
-genai.configure(api_key=AI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")  # Быстрая и точная модель
+# Настройка ИИ с использованием REST-транспорта для обхода блокировок
+try:
+    genai.configure(api_key=AI_API_KEY, transport='rest')
+    model = genai.GenerativeModel("gemini-1.5-flash")
+except Exception as e:
+    print(f"Ошибка инициализации Gemini: {e}")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-
 class UserState(StatesGroup):
     is_ai_mode = State()
-
 
 def get_main_kb():
     builder = ReplyKeyboardBuilder()
@@ -30,35 +31,28 @@ def get_main_kb():
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
-
 @dp.message(CommandStart())
 async def start_handler(message: types.Message, state: FSMContext):
     await state.clear()
     if message.from_user.id == ADMIN_ID:
         bot_user = await bot.get_me()
-        await message.answer(f"Привет, босс! Твоя ссылка: https://t.me/{bot_user.username}\n\n"
-                             f"Тут будут анонимные вопросы.")
+        await message.answer(f"Привет, босс! Твоя ссылка: https://t.me/{bot_user.username}\nБот готов к работе.")
     else:
-        await message.answer(
-            "Привет! Я могу передать твой вопрос владельцу анонимно или помочь решить задачу с помощью ИИ. Выбери режим:",
-            reply_markup=get_main_kb())
-
+        await message.answer("Привет! Выбери режим:", reply_markup=get_main_kb())
 
 @dp.message(F.text == "🤖 Помощь ИИ (задачки)")
 async def set_ai_mode(message: types.Message, state: FSMContext):
     await state.set_state(UserState.is_ai_mode)
-    await message.answer("🤖 Режим ИИ включен. Присылай условие задачи или любой вопрос — я постараюсь помочь!")
-
+    await message.answer("🤖 Режим ИИ включен. Присылай задачу!")
 
 @dp.message(F.text == "👤 Написать владельцу")
 async def set_owner_mode(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("👤 Режим анонимности включен. Напиши что-нибудь, и я передам это владельцу.")
-
+    await message.answer("👤 Режим анонимки включен. Напиши сообщение.")
 
 @dp.message(F.text)
 async def handle_messages(message: types.Message, state: FSMContext):
-    # Логика ответов админа
+    # Ответы владельца
     if message.from_user.id == ADMIN_ID and message.reply_to_message:
         try:
             target_id = int(message.reply_to_message.text.split("#id")[-1])
@@ -68,30 +62,40 @@ async def handle_messages(message: types.Message, state: FSMContext):
             await message.answer("❌ Ошибка: нужно отвечать на сообщение с #id.")
         return
 
-    # Логика пользователя
+    # Логика для пользователя
     current_state = await state.get_state()
-
+    
     if current_state == UserState.is_ai_mode:
-        waiting_msg = await message.answer("⏳ *ИИ анализирует ваш запрос...*", parse_mode="Markdown")
+        waiting_msg = await message.answer("⏳ *ИИ анализирует...*", parse_mode="Markdown")
         try:
             # Запрос к нейросети
-            response = model.generate_content(f"Реши задачу или ответь на вопрос кратко и понятно: {message.text}")
-            await waiting_msg.edit_text(f"🤖 **Ответ ИИ:**\n\n{response.text}", parse_mode="Markdown")
+            response = model.generate_content(message.text)
+            
+            if response and response.text:
+                await waiting_msg.edit_text(f"🤖 **Ответ ИИ:**\n\n{response.text}")
+            else:
+                await waiting_msg.edit_text("⚠️ ИИ не выдал текст. Попробуй переформулировать.")
+        
         except Exception as e:
-            await waiting_msg.edit_text("❌ Произошла ошибка при обращении к ИИ. Попробуйте позже.")
-
+            error_str = str(e)
+            print(f"ERROR: {error_str}")
+            # Если даже REST не помог, выводим подсказку
+            if "location" in error_str.lower() or "403" in error_str:
+                await waiting_msg.edit_text("❌ Ошибка: Google блокирует этот сервер по региону. Попробуй другой вопрос или напиши владельцу.")
+            else:
+                await waiting_msg.edit_text(f"❌ Ошибка ИИ: {error_str[:100]}")
+    
     else:
+        # Анонимное сообщение владельцу
         if message.from_user.id != ADMIN_ID:
             await bot.send_message(
-                ADMIN_ID,
-                f"📩 **Анонимный вопрос:**\n\n{message.text}\n\n#id{message.from_user.id}"
+                ADMIN_ID, 
+                f"📩 **Новый вопрос:**\n\n{message.text}\n\n#id{message.from_user.id}"
             )
-            await message.answer("🚀 Сообщение отправлено! Если владелец ответит, ты получишь уведомление.")
-
+            await message.answer("🚀 Твое сообщение отправлено!")
 
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
