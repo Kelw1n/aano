@@ -1,22 +1,23 @@
 import asyncio
-import google.generativeai as genai
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from langchain_gigachat.chat_models import GigaChat
 
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = "7981362710:AAE8yFG-pgP_MPrrvhw7ayF-CLLQBK2Sw4g"
 ADMIN_ID = 1150861829
-AI_API_KEY = "AIzaSyDSxDkw6deZjjbT1WU-T6pWw9atfk3567s"
+# Твой ключ авторизации GigaChat
+GIGA_AUTH_KEY = "MDE5YjQ4Y2MtYzdkYy03YmJiLWFkNDctMzNmZmFiYjRkYWQ5OjYxM2QwNWNhLWRkNmItNDk4Ni05MDU4LTY2MTYyMDI4MzQzZg=="
 
-# Настройка ИИ с использованием REST-транспорта для обхода блокировок
-try:
-    genai.configure(api_key=AI_API_KEY, transport='rest')
-    model = genai.GenerativeModel("gemini-1.5-flash")
-except Exception as e:
-    print(f"Ошибка инициализации Gemini: {e}")
+# Настройка ИИ GigaChat
+llm = GigaChat(
+    credentials=GIGA_AUTH_KEY,
+    verify_ssl_certs=False, # Важно для работы на некоторых серверах
+    model="GigaChat"
+)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -36,54 +37,44 @@ async def start_handler(message: types.Message, state: FSMContext):
     await state.clear()
     if message.from_user.id == ADMIN_ID:
         bot_user = await bot.get_me()
-        await message.answer(f"Привет, босс! Твоя ссылка: https://t.me/{bot_user.username}\nБот готов к работе.")
+        await message.answer(f"Привет, босс! Ссылка: https://t.me/{bot_user.username}")
     else:
-        await message.answer("Привет! Выбери режим:", reply_markup=get_main_kb())
+        await message.answer("Выбери режим работы:", reply_markup=get_main_kb())
 
 @dp.message(F.text == "🤖 Помощь ИИ (задачки)")
 async def set_ai_mode(message: types.Message, state: FSMContext):
     await state.set_state(UserState.is_ai_mode)
-    await message.answer("🤖 Режим ИИ включен. Присылай задачу!")
+    await message.answer("🤖 Режим GigaChat включен. Присылай задачу или вопрос!")
 
 @dp.message(F.text == "👤 Написать владельцу")
 async def set_owner_mode(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("👤 Режим анонимки включен. Напиши сообщение.")
+    await message.answer("👤 Режим анонимки включен. Что передать владельцу?")
 
 @dp.message(F.text)
 async def handle_messages(message: types.Message, state: FSMContext):
-    # Ответы владельца
+    # Ответы админа (владельца)
     if message.from_user.id == ADMIN_ID and message.reply_to_message:
         try:
             target_id = int(message.reply_to_message.text.split("#id")[-1])
             await bot.send_message(target_id, f"✉️ **Ответ от владельца:**\n\n{message.text}")
             await message.answer("✅ Отправлено!")
         except:
-            await message.answer("❌ Ошибка: нужно отвечать на сообщение с #id.")
+            await message.answer("❌ Нужно нажать 'ответить' на сообщение с тегом #id.")
         return
 
-    # Логика для пользователя
+    # Режим работы для пользователя
     current_state = await state.get_state()
     
     if current_state == UserState.is_ai_mode:
-        waiting_msg = await message.answer("⏳ *ИИ анализирует...*", parse_mode="Markdown")
+        waiting_msg = await message.answer("⏳ *GigaChat думает...*", parse_mode="Markdown")
         try:
-            # Запрос к нейросети
-            response = model.generate_content(message.text)
-            
-            if response and response.text:
-                await waiting_msg.edit_text(f"🤖 **Ответ ИИ:**\n\n{response.text}")
-            else:
-                await waiting_msg.edit_text("⚠️ ИИ не выдал текст. Попробуй переформулировать.")
-        
+            # Запрос к GigaChat
+            response = llm.invoke(message.text)
+            await waiting_msg.edit_text(f"🤖 **Ответ ИИ:**\n\n{response.content}")
         except Exception as e:
-            error_str = str(e)
-            print(f"ERROR: {error_str}")
-            # Если даже REST не помог, выводим подсказку
-            if "location" in error_str.lower() or "403" in error_str:
-                await waiting_msg.edit_text("❌ Ошибка: Google блокирует этот сервер по региону. Попробуй другой вопрос или напиши владельцу.")
-            else:
-                await waiting_msg.edit_text(f"❌ Ошибка ИИ: {error_str[:100]}")
+            await waiting_msg.edit_text(f"❌ Ошибка ИИ: Не удалось получить ответ. Проверь статус ключа в кабинете Сбера.")
+            print(f"GigaChat Error: {e}")
     
     else:
         # Анонимное сообщение владельцу
