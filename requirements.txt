@@ -1,2 +1,7 @@
-aiogram
-langchain-gigachat
+asyncio
+logging
+os
+sys
+aiohttp
+aiosqlite
+hashlib
