@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 # --- КОНФИГУРАЦИЯ ---
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("7981362710:AAE8yFG-pgP_MPrrvhw7ayF-CLLQBK2Sw4g")
 DB_NAME = "free_ai_images.db"
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
